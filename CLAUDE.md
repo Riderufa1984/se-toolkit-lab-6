@@ -6,15 +6,15 @@ Full reference: `contributing/conventions/lab.md`
 
 Read before making changes:
 
-- [`contributing/conventions/common.md`](contributing/conventions/common.md) — writing conventions (formatting, links, alerts, etc.)
-- [`contributing/conventions/tasks.md`](contributing/conventions/tasks.md) — task structure and design principles
+- [`contributing/conventions/writing/common.md`](contributing/conventions/writing/common.md) — writing conventions (formatting, links, alerts, etc.)
+- [`contributing/conventions/writing/tasks.md`](contributing/conventions/writing/tasks.md) — task structure and design principles
 
 ## When editing `wiki/`
 
 Read before making changes:
 
-- [`contributing/conventions/common.md`](contributing/conventions/common.md) — writing conventions (formatting, links, alerts, etc.)
-- [`contributing/conventions/wiki.md`](contributing/conventions/wiki.md) — wiki file structure and section patterns
+- [`contributing/conventions/writing/common.md`](contributing/conventions/writing/common.md) — writing conventions (formatting, links, alerts, etc.)
+- [`contributing/conventions/writing/wiki.md`](contributing/conventions/writing/wiki.md) — wiki file structure and section patterns
 
 ## When creating or restructuring a lab
 
