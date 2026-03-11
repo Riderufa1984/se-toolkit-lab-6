@@ -1,4 +1,4 @@
-# Lab 5 — Data Pipeline & Analytics Dashboard
+# Lab 6 — Build Your Own Agent
 
 The lab gets updated regularly, so do [sync your fork with the upstream](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/syncing-a-fork#syncing-a-fork-branch-from-the-command-line) from time to time.
 
@@ -10,23 +10,14 @@ The lab gets updated regularly, so do [sync your fork with the upstream](https:/
 - [Tasks](#tasks)
   - [Prerequisites](#prerequisites)
   - [Required](#required)
-  - [Optional](#optional)
 
 ## Lab story
 
-Today's tasks will be about **Data engineering**.
-Same project – **Learning Management Service**.
+You have a running Learning Management Service — a backend, a database full of analytics data, and a frontend dashboard. The course is coming to a close and you need to review everything you've learned.
 
-The system has an API and front-end in place. Now the team needs to populate the database with real data from an external source, build analytics on top of it, and visualize the results.
+Instead of manually reviewing, you'll build a **CLI agent** that can answer questions about the course and about your own system. The agent uses an LLM with tools to read your codebase and query your API.
 
-A senior data engineer explains your next assignment:
-
-> 1. Build an ETL (extract-transform-load) pipeline that fetches data from the autochecker API and loads it into the database.
-> 2. Implement analytics endpoints that aggregate the data for dashboards.
-> 3. Add dashboard charts to the front-end to visualize the analytics.
-
-> [!IMPORTANT]
-> Communicate through issues and PRs and deliver a working deployment.
+An evaluation benchmark tests your agent with ~30 questions. You can't see the questions upfront — you discover them by running the checker. Each failed question tells you what went wrong, and you fix it. By the time your agent passes, you've reviewed the course material and understood how agents work.
 
 ## Learning advice
 
@@ -42,19 +33,18 @@ You need an agent that has access to the whole repo to work effectively.
 
 By the end of this lab, you should be able to:
 
-- Build an ETL pipeline that fetches data from an external API.
-- Handle pagination, incremental sync, and idempotent upserts.
-- Write SQL aggregation queries (GROUP BY, COUNT, AVG, CASE WHEN).
-- Implement REST API endpoints that return computed analytics.
-- Use pre-written tests to validate your implementation.
-- Integrate Chart.js into a React front-end for data visualization.
-- Use an AI coding agent for ETL and front-end development.
+- Explain how an agentic loop works: user input → LLM → tool call → execute → feed result → repeat until final answer.
+- Integrate with an LLM API using the OpenAI-compatible chat completions format with tool/function calling.
+- Implement tools that read files, list directories, and query HTTP APIs, then register them as function-calling schemas.
+- Build a CLI that accepts structured input and produces structured output (JSON).
+- Debug agent behavior by examining tool call traces, identifying prompt issues, and fixing tool implementations.
+- Assess agent quality against a benchmark, iterating on prompts and tools to improve pass rate.
 
 In simple words, you should be able to say:
 >
-> 1. I built a pipeline that fetches data from an external API and loads it into the database!
-> 2. I implemented analytics endpoints and made all tests pass!
-> 3. I added charts to the front-end to visualize the analytics!
+> 1. I built an agent that calls an LLM and answers questions!
+> 2. I gave it tools to read files and query my API!
+> 3. I iterated until it passed the evaluation benchmark!
 
 ## Tasks
 
@@ -66,10 +56,6 @@ In simple words, you should be able to say:
 
 ### Required
 
-1. [Build the data pipeline](./lab/tasks/required/task-1.md#build-the-data-pipeline)
-2. [Analytics endpoints](./lab/tasks/required/task-2.md#analytics-endpoints)
-3. [Dashboard frontend](./lab/tasks/required/task-3.md#dashboard-frontend)
-
-### Optional
-
-1. [Grafana dashboard](./lab/tasks/optional/task-1.md#grafana-dashboard)
+1. [Basic agent loop](./lab/tasks/required/task-1.md#basic-agent-loop)
+2. [Add tools](./lab/tasks/required/task-2.md)
+3. [Pass the benchmark](./lab/tasks/required/task-3.md)
