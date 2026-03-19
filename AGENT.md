@@ -2,7 +2,7 @@
 
 ## Overview
 
-This agent is a CLI tool that connects to an LLM with **tools** to answer questions by reading project documentation. It implements an **agentic loop** that allows the LLM to discover files, read content, and provide answers with source references.
+This agent is a CLI tool that connects to an LLM with **tools** to answer questions by reading project documentation, exploring source code, and querying the live backend API. It implements an **agentic loop** that allows the LLM to discover files, read content, query APIs, and provide answers with source references.
 
 ## Architecture
 
@@ -48,28 +48,17 @@ This agent is a CLI tool that connects to an LLM with **tools** to answer questi
    - If no `tool_calls` → extract answer and source, output JSON
 3. Maximum 10 tool calls per question (safety limit)
 
-## Components
+## Tools
 
-### `agent.py`
+The agent has three tools that the LLM can call:
 
-The main CLI entry point that:
-
-1. **Parses command-line arguments** — expects a single question
-2. **Loads LLM configuration** — reads from `.env.agent.secret`
-3. **Runs the agentic loop** — calls LLM, executes tools, repeats until final answer
-4. **Formats the response** — outputs valid JSON with `answer`, `source`, and `tool_calls`
-
-### Tools
-
-The agent has two tools that the LLM can call:
-
-#### `read_file(path: str)`
+### `read_file(path: str)`
 
 Reads a file from the project repository.
 
 **Parameters:**
 
-- `path`: Relative path from project root (e.g., `wiki/git-workflow.md`)
+- `path`: Relative path from project root (e.g., `wiki/git-workflow.md`, `backend/app/main.py`)
 
 **Returns:** File contents as string, or error message
 
@@ -79,13 +68,13 @@ Reads a file from the project repository.
 - Rejects absolute paths
 - Only allows paths within project root
 
-#### `list_files(path: str)`
+### `list_files(path: str)`
 
 Lists files and directories at a given path.
 
 **Parameters:**
 
-- `path`: Relative directory path from project root (e.g., `wiki`)
+- `path`: Relative directory path from project root (e.g., `wiki`, `backend/app/routers`)
 
 **Returns:** Newline-separated listing of entries
 
@@ -93,38 +82,26 @@ Lists files and directories at a given path.
 
 - Same path traversal protections as `read_file`
 
-### Tool Schema (for LLM)
+### `query_api(method: str, path: str, body: str = None, use_auth: bool = True)`
 
-Tools are defined as function-calling schemas:
+Queries the backend API.
 
-```json
-{
-  "type": "function",
-  "function": {
-    "name": "read_file",
-    "description": "Read a file from the project repository",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "path": {"type": "string"}
-      },
-      "required": ["path"]
-    }
-  }
-}
-```
+**Parameters:**
 
-### System Prompt
+- `method`: HTTP method (GET, POST, etc.)
+- `path`: API path (e.g., `/items/`, `/analytics/completion-rate?lab=lab-01`)
+- `body`: Optional JSON request body for POST/PUT requests
+- `use_auth`: Whether to include authentication header (default: true). Set to false to test 401/403 responses.
 
-The system prompt instructs the LLM to:
+**Returns:** JSON string with `status_code` and `body`
 
-1. Use `list_files` to discover relevant wiki files
-2. Use `read_file` to read content and find answers
-3. Include source references (`wiki/filename.md#section-anchor`)
-4. Call one tool at a time and wait for results
-5. Stop after finding the answer (max 10 tool calls)
+**Authentication:** Uses `LMS_API_KEY` from `.env.docker.secret` via `Authorization: Bearer` header when `use_auth=true`.
 
-## Environment Configuration (`.env.agent.secret`)
+## Environment Configuration
+
+The agent reads configuration from two environment files:
+
+### `.env.agent.secret` (LLM Configuration)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
@@ -132,7 +109,33 @@ The system prompt instructs the LLM to:
 | `LLM_API_BASE` | Base URL of the LLM API | `http://10.93.26.104:42005/v1` |
 | `LLM_MODEL` | Model name to use | `qwen3-coder-plus` |
 
-> **Note:** This file is gitignored. Never commit API keys.
+### `.env.docker.secret` (Backend API Configuration)
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `LMS_API_KEY` | Backend API key for `query_api` auth | `my-secret-api-key` |
+| `AGENT_API_BASE_URL` | Base URL for backend API (optional) | `http://localhost:42002` |
+
+> **Note:** These files are gitignored. Never commit API keys.
+
+## System Prompt Strategy
+
+The system prompt guides the LLM to choose the right tool for each question type:
+
+1. **Wiki questions** (how-to guides, workflows): Use `list_files` and `read_file` on `wiki/`
+2. **Source code questions** (framework, structure): Use `list_files` and `read_file` on `backend/`
+3. **Data questions** (counts, scores): Use `query_api` with GET method
+4. **Status code questions** (what happens without auth): Use `query_api` with `use_auth=false`
+5. **Bug diagnosis questions**: Use `query_api` to reproduce error, then `read_file` to find the bug
+6. **Architecture questions** (request flow): Use `read_file` on docker-compose.yml, Dockerfile
+
+### Bug Diagnosis Guidance
+
+The system prompt explicitly teaches the LLM to look for common bugs:
+
+- **Division by zero**: Check if division happens without checking for zero
+- **None comparisons**: Sorting with `None` values fails (`TypeError`)
+- **Missing null checks**: API responses might be empty or null
 
 ## Input/Output
 
@@ -140,24 +143,21 @@ The system prompt instructs the LLM to:
 
 ```bash
 uv run agent.py "How do you resolve a merge conflict?"
+uv run agent.py "How many items are in the database?"
+uv run agent.py "What HTTP status code does /items/ return without auth?"
 ```
 
 ### Output
 
 ```json
 {
-  "answer": "A merge conflict occurs when two branches modify the same lines...",
-  "source": "wiki/git-workflow.md#resolving-merge-conflicts",
+  "answer": "There are 44 items in the database.",
+  "source": "backend/app/routers/analytics.py",
   "tool_calls": [
     {
-      "tool": "list_files",
-      "args": {"path": "wiki"},
-      "result": "api.md\ngit-workflow.md\n..."
-    },
-    {
-      "tool": "read_file",
-      "args": {"path": "wiki/git-workflow.md"},
-      "result": "# Git Workflow\n\n..."
+      "tool": "query_api",
+      "args": {"method": "GET", "path": "/items/"},
+      "result": "{\"status_code\": 200, \"body\": \"[...]\"}"
     }
   ]
 }
@@ -166,7 +166,7 @@ uv run agent.py "How do you resolve a merge conflict?"
 **Fields:**
 
 - `answer` (string): The LLM's response
-- `source` (string): Wiki file reference (e.g., `wiki/git-workflow.md#section`)
+- `source` (string): File reference for wiki/source questions (optional for API data questions)
 - `tool_calls` (array): All tool calls made during the agentic loop
 
 ## API Contract
@@ -189,39 +189,11 @@ Content-Type: application/json
 }
 ```
 
-### LLM Response (with tool calls)
+### Backend API Request
 
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [
-        {
-          "id": "call_abc",
-          "function": {
-            "name": "read_file",
-            "arguments": "{\"path\": \"wiki/git.md\"}"
-          }
-        }
-      ]
-    }
-  }]
-}
-```
-
-### LLM Response (final answer)
-
-```json
-{
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": "To resolve a merge conflict..."
-    }
-  }]
-}
+```http
+GET {AGENT_API_BASE_URL}/items/
+Authorization: Bearer {LMS_API_KEY}
 ```
 
 ## Error Handling
@@ -253,20 +225,32 @@ def validate_path(path: str) -> tuple[bool, str]:
     return True, ""
 ```
 
+### API Key Security
+
+- `LMS_API_KEY` is read from environment, never hardcoded
+- API key is only sent to the configured `AGENT_API_BASE_URL`
+- Keys are not logged or included in output
+
 ## Usage
 
 ```bash
-# Basic usage
-uv run agent.py "What is REST?"
-
-# Question requiring file discovery
-uv run agent.py "What files are in the wiki?"
-
-# Question requiring file reading
+# Wiki question
 uv run agent.py "How do you resolve a merge conflict?"
 
-# With debug output visible
-uv run agent.py "Explain Git workflow" 2>&1
+# Source code question
+uv run agent.py "What framework does the backend use?"
+
+# Data query
+uv run agent.py "How many items are in the database?"
+
+# Status code test
+uv run agent.py "What status code does /items/ return without auth?"
+
+# Bug diagnosis
+uv run agent.py "Why does /analytics/completion-rate crash for lab-99?"
+
+# Architecture question
+uv run agent.py "Explain the request flow from browser to database"
 ```
 
 ## Testing
@@ -274,15 +258,16 @@ uv run agent.py "Explain Git workflow" 2>&1
 Run the regression tests:
 
 ```bash
-pytest tests/test_agent_task2.py -v
+pytest tests/test_agent_task3.py -v
 ```
 
-**Tests verify:**
+Run the full benchmark:
 
-1. Tool calls are executed (`read_file`, `list_files`)
-2. `tool_calls` array is populated in output
-3. `source` field references wiki files
-4. JSON output is valid
+```bash
+uv run run_eval.py
+```
+
+**Benchmark Results: 10/10 PASSED**
 
 ## LLM Provider
 
@@ -297,8 +282,33 @@ pytest tests/test_agent_task2.py -v
 
 **Deployment:** The Qwen Code API is deployed on the VM at `http://10.93.26.104:42005/v1`.
 
-## Future Extensions (Task 3)
+## Lessons Learned
 
-- Add more tools (e.g., `query_api` to query the backend)
+### Tool Design
+
+1. **Tool naming matters:** The autochecker expects specific tool names. Having `query_api_no_auth` as a separate tool caused failures because the test expected `query_api`. Solution: Use optional parameters (`use_auth`) instead of separate tools.
+
+2. **Parameter flexibility:** Optional parameters give the LLM more flexibility while keeping tool names consistent. The `use_auth` parameter allows testing both authenticated and unauthenticated responses with the same tool.
+
+3. **Tool descriptions are critical:** Clear, specific descriptions help the LLM choose the right tool. For example, explicitly mentioning "Set use_auth=false to test 401/403 responses" guides the LLM to the right parameter.
+
+### Bug Diagnosis
+
+1. **Explicit guidance needed:** The LLM needs explicit guidance on what bugs to look for. Adding specific patterns (division by zero, None comparisons in sorting) significantly improved bug diagnosis.
+
+2. **Two-step diagnosis:** The pattern "query to reproduce → read source to find bug" works well. The LLM first sees the error message, then examines the code to find the root cause.
+
+### Iteration Process
+
+1. **Run benchmark early:** Running `run_eval.py` after initial implementation revealed 7/10 passing, with clear failure reasons.
+
+2. **Fix one thing at a time:** Each iteration focused on one type of failure (tool naming, bug guidance, etc.).
+
+3. **System prompt is key:** Most improvements came from refining the system prompt, not code changes.
+
+## Future Extensions
+
+- Add more tools (e.g., `search_code` for grep-like searches)
 - Improved source extraction (section anchors from headings)
-- Better conversation management for complex multi-step queries
+- Conversation memory for multi-question sessions
+- Caching for repeated file reads and API queries
