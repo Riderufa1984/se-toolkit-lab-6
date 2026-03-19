@@ -21,8 +21,11 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
-# Load environment variables from .env.agent.secret
+# Load LLM config from .env.agent.secret
 load_dotenv(".env.agent.secret")
+
+# Load LMS API key from .env.docker.secret
+load_dotenv(".env.docker.secret", override=False)
 
 # Constants
 MAX_TOOL_CALLS = 10
@@ -49,6 +52,21 @@ def get_llm_config() -> dict:
         "api_key": api_key,
         "api_base": api_base,
         "model": model,
+    }
+
+
+def get_api_config() -> dict:
+    """Load API configuration from environment variables."""
+    lms_api_key = os.getenv("LMS_API_KEY")
+    api_base_url = os.getenv("AGENT_API_BASE_URL", "http://localhost:42002")
+
+    if not lms_api_key:
+        print("Error: LMS_API_KEY not set in .env.docker.secret", file=sys.stderr)
+        sys.exit(1)
+
+    return {
+        "lms_api_key": lms_api_key,
+        "api_base_url": api_base_url.rstrip("/"),
     }
 
 
@@ -134,19 +152,77 @@ def list_files(path: str) -> str:
         return f"Error listing directory: {e}"
 
 
+def query_api(method: str, path: str, body: str = None, use_auth: bool = True) -> str:
+    """
+    Query the backend API.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        path: API path (e.g., /items/)
+        body: Optional JSON request body
+        use_auth: Whether to include authentication (default True). Set to False to test 401/403 responses.
+
+    Returns:
+        JSON string with status_code and body, or error message
+    """
+    api_config = get_api_config()
+    url = f"{api_config['api_base_url']}{path}"
+
+    headers = {}
+    if use_auth:
+        headers["Authorization"] = f"Bearer {api_config['lms_api_key']}"
+
+    auth_status = "with auth" if use_auth else "without auth"
+    print(f"Querying API ({auth_status}): {method} {url}", file=sys.stderr)
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            if method.upper() == "GET":
+                response = client.get(url, headers=headers)
+            elif method.upper() == "POST":
+                if body:
+                    headers["Content-Type"] = "application/json"
+                    response = client.post(url, headers=headers, content=body)
+                else:
+                    response = client.post(url, headers=headers)
+            elif method.upper() == "PUT":
+                if body:
+                    headers["Content-Type"] = "application/json"
+                    response = client.put(url, headers=headers, content=body)
+                else:
+                    response = client.put(url, headers=headers)
+            elif method.upper() == "DELETE":
+                response = client.delete(url, headers=headers)
+            else:
+                return f"Error: Unsupported method: {method}"
+
+        result = {
+            "status_code": response.status_code,
+            "body": response.text,
+        }
+        return json.dumps(result)
+
+    except httpx.TimeoutException:
+        return f"Error: API request timed out (30s)"
+    except httpx.HTTPError as e:
+        return f"Error: HTTP request failed: {e}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
 # Tool definitions for LLM function calling
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file from the project repository. Use this to read the content of a specific file.",
+            "description": "Read a file from the project repository. Use this to read wiki documentation or source code files.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative path from project root (e.g., 'wiki/git-workflow.md')",
+                        "description": "Relative path from project root (e.g., 'wiki/git-workflow.md' or 'backend/app/main.py')",
                     }
                 },
                 "required": ["path"],
@@ -157,36 +233,96 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "List files and directories at a given path. Use this to discover what files exist in a directory.",
+            "description": "List files and directories at a given path. Use this to discover what files exist in a directory like wiki/ or backend/.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative directory path from project root (e.g., 'wiki')",
+                        "description": "Relative directory path from project root (e.g., 'wiki' or 'backend/app/routers')",
                     }
                 },
                 "required": ["path"],
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_api",
+            "description": "Query the backend API. Use this to fetch data (like item counts), check status codes, or test endpoints. Set use_auth=false to test what happens without authentication (e.g., 401/403 responses).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method (GET, POST, etc.)",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "API path (e.g., /items/ or /analytics/completion-rate?lab=lab-01)",
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "JSON request body for POST/PUT requests (optional)",
+                    },
+                    "use_auth": {
+                        "type": "boolean",
+                        "description": "Whether to include authentication header (default: true). Set to false to test 401/403 responses.",
+                    },
+                },
+                "required": ["method", "path"],
+            },
+        },
+    },
 ]
 
 # System prompt for the agent
-SYSTEM_PROMPT = """You are a helpful documentation agent. You have access to tools to read files and list directories in the project wiki.
+SYSTEM_PROMPT = """You are a helpful system agent. You have access to tools to read files, list directories, and query the backend API.
 
-When answering questions:
-1. First use list_files to discover relevant wiki files if you don't know the exact file path
-2. Then use read_file to read the content and find the answer
-3. Include the source reference as: wiki/filename.md#section-anchor (use the section heading, lowercase with hyphens)
-4. Only call one tool at a time and wait for results
-5. After you have found the answer, respond with the final answer without calling more tools
+When answering questions, choose the right tool:
+
+1. **Wiki questions** (how-to guides, workflows, SSH, Git): 
+   - Use `list_files` to discover wiki files
+   - Use `read_file` to read the content
+   - Include source as: wiki/filename.md#section-anchor
+
+2. **Source code questions** (framework, structure, routers):
+   - Use `list_files` to explore backend/ directory
+   - Use `read_file` to read specific files
+   - Include source as: backend/path/to/file.py
+
+3. **Data questions** (counts, scores, analytics):
+   - Use `query_api` with GET method to fetch data
+   - Example: query_api(method="GET", path="/items/")
+
+4. **Status code questions** (what happens without auth):
+   - Use `query_api` with `use_auth=false` to test without authentication
+   - This shows the raw status code (401, 403, etc.)
+
+5. **Bug diagnosis questions**:
+   - First use `query_api` to reproduce the error and see the error message
+   - Then use `read_file` to find the buggy code in the source
+   - Look for common bugs: division by zero, None comparisons, sorting with None values
+   - Explain both the error type and the root cause in the code
+   - For sorting bugs: check if `sorted()` is called on values that could be `None`
+   - For division bugs: check if division happens without checking for zero
+
+6. **Architecture questions** (request flow, docker):
+   - Use `read_file` to read docker-compose.yml, Dockerfile, etc.
+   - Trace the full journey step by step
+
+Important rules:
+- Only call one tool at a time and wait for results
+- Stop calling tools once you have the answer
+- Maximum 10 tool calls per question
+- For wiki/source questions, always include the source field
+- For API data questions, source is optional
 
 Available tools:
-- read_file(path: str) - Read a file from the project
+- read_file(path: str) - Read a file
 - list_files(path: str) - List files in a directory
-
-Always include the source field in your final answer referencing the wiki file you read."""
+- query_api(method: str, path: str, body: str, use_auth: bool) - Query API (use_auth defaults to true)"""
 
 
 def execute_tool(tool_name: str, args: dict) -> str:
@@ -197,6 +333,13 @@ def execute_tool(tool_name: str, args: dict) -> str:
         return read_file(args.get("path", ""))
     elif tool_name == "list_files":
         return list_files(args.get("path", ""))
+    elif tool_name == "query_api":
+        return query_api(
+            args.get("method", "GET"),
+            args.get("path", ""),
+            args.get("body"),
+            args.get("use_auth", True),
+        )
     else:
         return f"Error: Unknown tool: {tool_name}"
 
@@ -306,7 +449,6 @@ def run_agentic_loop(question: str, config: dict) -> tuple[str, str, list]:
             if files_read:
                 # Use the last file read as the source
                 last_file = files_read[-1]
-                # Try to extract a section anchor from the answer
                 source = f"{last_file}"
 
             return answer, source, tool_calls_log
