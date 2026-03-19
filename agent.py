@@ -21,10 +21,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
-# Load LLM config from .env.agent.secret
-load_dotenv(".env.agent.secret")
-
-# Load LMS API key from .env.docker.secret
+# Load environment variables from .env files as fallback
+# Environment variables set by the autochecker take precedence
+load_dotenv(".env.agent.secret", override=False)
 load_dotenv(".env.docker.secret", override=False)
 
 # Constants
