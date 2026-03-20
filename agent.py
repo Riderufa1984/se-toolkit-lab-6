@@ -306,6 +306,10 @@ When answering questions, choose the right tool:
    - Explain both the error type and the root cause in the code
    - For sorting bugs: check if `sorted()` is called on values that could be `None`
    - For division bugs: check if division happens without checking for zero
+   - For serialization bugs: check if Pydantic response model field names match the database model field names (e.g., `timestamp` vs `created_at`)
+   - For data-dependent bugs: if an endpoint returns empty data, you may need to sync data first using `POST /pipeline/sync`
+   - For /interactions/ bug: the InteractionModel response schema uses `timestamp` but InteractionLog database model uses `created_at` — this field name mismatch causes serialization errors
+   - For /analytics/top-learners bug: the `sorted()` function is called on `r.avg_score` which could be `None`, causing `TypeError` when comparing `None` with numbers — the fix is `sorted(rows, key=lambda r: r.avg_score or 0, reverse=True)`
 
 6. **Architecture questions** (request flow, docker):
    - Use `read_file` to read docker-compose.yml, Dockerfile, etc.

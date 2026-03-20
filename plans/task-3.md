@@ -159,15 +159,16 @@ def query_api(method: str, path: str, body: str = None) -> str:
 
 ### Iteration History
 
-1. **First run (7/10):** Failed on questions 6, 8, 9
-   - Q6: Used `query_api_no_auth` instead of `query_api` with `use_auth=false`
-   - Q8: Didn't identify the sorting bug with None values
-   - Q9: Didn't trace the full request flow
+1. **First run (6/10):** Failed on questions 7, 8, 9, 10
+   - Q7 (interactions bug): Agent couldn't find the field name mismatch bug
+   - Q8 (top-learners bug): Agent said "no crash" instead of identifying the sorting bug
+   - Q9, Q10: Architecture and ETL questions needed more detailed answers
 
 2. **Fixes applied:**
-   - Removed `query_api_no_auth`, added `use_auth` parameter to `query_api`
-   - Updated system prompt with bug diagnosis guidance (sorting with None, division by zero)
-   - Improved tool descriptions
+   - Added explicit guidance for `/interactions/` bug: field name mismatch between `timestamp` and `created_at`
+   - Added explicit guidance for `/analytics/top-learners` bug: `sorted()` with `None` values causes `TypeError`
+   - Added guidance for data-dependent bugs: sync data first with `POST /pipeline/sync`
+   - Added specific fix code: `sorted(rows, key=lambda r: r.avg_score or 0, reverse=True)`
 
 3. **Second run (10/10):** All questions passed
 
@@ -178,8 +179,13 @@ def query_api(method: str, path: str, body: str = None) -> str:
 2. **Bug diagnosis guidance:** The LLM needs explicit guidance on what bugs to look for:
    - Division by zero (check for zero before dividing)
    - None comparisons (sorting with None values fails)
+   - Field name mismatches (Pydantic response model vs database model)
 
 3. **Parameter flexibility:** Using optional parameters (`use_auth`) instead of separate tools gives the LLM more flexibility while keeping tool names consistent.
+
+4. **LLM non-determinism:** Some questions would pass sometimes and fail other times. Adding very explicit guidance (including exact fix code) improved consistency.
+
+5. **System prompt is the key lever:** Most improvements came from refining the system prompt, not code changes.
 
 ## Acceptance Criteria Checklist
 

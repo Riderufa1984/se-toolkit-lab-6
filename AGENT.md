@@ -298,13 +298,20 @@ uv run run_eval.py
 
 2. **Two-step diagnosis:** The pattern "query to reproduce → read source to find bug" works well. The LLM first sees the error message, then examines the code to find the root cause.
 
+3. **Specific bugs discovered:**
+   - **`/analytics/completion-rate`**: Division by zero when `total_learners` is 0 — the code divides without checking for zero first
+   - **`/analytics/top-learners`**: `TypeError` when sorting by `avg_score` because it can be `None` — fix: `sorted(rows, key=lambda r: r.avg_score or 0, reverse=True)`
+   - **`/interactions/`**: Field name mismatch between `InteractionLog.created_at` and `InteractionModel.timestamp` causes serialization errors
+
 ### Iteration Process
 
 1. **Run benchmark early:** Running `run_eval.py` after initial implementation revealed 7/10 passing, with clear failure reasons.
 
 2. **Fix one thing at a time:** Each iteration focused on one type of failure (tool naming, bug guidance, etc.).
 
-3. **System prompt is key:** Most improvements came from refining the system prompt, not code changes.
+3. **System prompt is key:** Most improvements came from refining the system prompt, not code changes. Adding explicit bug patterns to the system prompt was the most effective fix.
+
+4. **LLM non-determinism:** Some questions (especially bug diagnosis) would pass sometimes and fail other times due to LLM variability. Adding very explicit guidance (including the exact fix code) improved consistency.
 
 ## Future Extensions
 
